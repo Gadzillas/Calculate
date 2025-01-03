@@ -1,0 +1,10 @@
+{% extends 'base.html' %}
+
+{% block title %}
+Нейросеть
+{% endblock %}
+
+{% block body %}
+Тут мы загружаем файл с историей проектов компании и обучаем нейросеть
+{{varible.to_html(classes="table") | safe}}
+{% endblock %}

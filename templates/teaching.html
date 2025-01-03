@@ -1,0 +1,97 @@
+{% extends 'base.html' %}
+
+{% block head %}
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Подключение библиотеки Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{% endblock %}
+
+{% block title %}Обучение модели{% endblock %}
+
+{% block body %}
+    <div class="container">
+        <h1>Обучение модели LSTM</h1>
+        <p id="status">Ожидание запуска обучения...</p>
+        <button id="startTrainingBtn" class="btn btn-primary">Запустить обучение</button>
+
+        <!-- Элемент для отображения графика -->
+        <canvas id="trainingChart" width="400" height="200"></canvas>
+
+        <script>
+            // Подключение к серверу через SocketIO
+            const socket = io.connect('http://' + document.domain + ':' + location.port);
+
+            // Инициализация графика с помощью Chart.js
+            const ctx = document.getElementById('trainingChart').getContext('2d');
+            const trainingChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [], // Эпохи
+                    datasets: [
+                        {
+                            label: 'Потери на обучении',
+                            data: [],
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            borderWidth: 2,
+                            fill: false
+                        },
+                        {
+                            label: 'Потери на валидации',
+                            data: [],
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            borderWidth: 2,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Эпохи'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Потери (Loss)'
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Обновление статуса обучения через SocketIO
+            socket.on('training_update', function(data) {
+                document.getElementById('status').innerText =
+                    `Эпоха: ${data.epoch}, Потери на обучении: ${data.train_loss}, Потери на валидации: ${data.val_loss}`;
+
+                // Обновляем график: добавляем новую эпоху и данные потерь
+                trainingChart.data.labels.push(data.epoch); // Добавляем номер эпохи
+                trainingChart.data.datasets[0].data.push(data.train_loss); // Добавляем потери на обучении
+                trainingChart.data.datasets[1].data.push(data.val_loss);   // Добавляем потери на валидации
+                trainingChart.update(); // Обновляем график
+            });
+
+            // Запуск обучения по нажатию на кнопку
+            document.getElementById('startTrainingBtn').addEventListener('click', function() {
+                document.getElementById('status').innerText = 'Запуск обучения...';
+
+                // Отправляем запрос на сервер для запуска обучения
+                fetch('/start_training', { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => {
+                        document.getElementById('status').innerText = 'Обучение началось...';
+                        console.log(data.message);
+                    })
+                    .catch(error => {
+                        document.getElementById('status').innerText = 'Ошибка при запуске обучения';
+                        console.error('Ошибка:', error);
+                    });
+            });
+        </script>
+    </div>
+{% endblock %}
