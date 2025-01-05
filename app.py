@@ -8,6 +8,7 @@ from net_teach import train_and_predict_lstm  # Импортируем функ�
 from flask_socketio import SocketIO, emit
 from threading import Thread
 import numpy as np
+import joblib
 from sklearn.preprocessing import StandardScaler
 from tensorflow.keras.models import load_model
 
@@ -140,38 +141,36 @@ def count():
         input_data = request.get_json()
         print(input_data)
         # Преобразуем входные данные в формат numpy для модели
-        data = np.array([[
-            input_data['total_kdsi'],
-            input_data['aaf'],
-            input_data['rely'],
-            input_data['data'],
-            input_data['cplx'],
-            input_data['time'],
-            input_data['stor'],
-            input_data['virt'],
-            input_data['turn'],
-            input_data['acap'],
-            input_data['aexp'],
-            input_data['pcap'],
-            input_data['vexp'],
-            input_data['lexp'],
-            input_data['modp'],
-            input_data['tool'],
-            input_data['sced']
-        ]])
-
+        try:
+            data = np.array([[float(input_data[col]) for col in [
+                'total_kdsi', 'aaf', 'rely', 'data', 'cplx', 'time', 'stor', 'virt', 'turn',
+                'acap', 'aexp', 'pcap', 'vexp', 'lexp', 'modp', 'tool', 'sced'
+            ]]])
+        except ValueError as e:
+            return jsonify({"error": f"Некорректные входные данные: {e}"}), 400
         # Масштабирование данных (как при обучении)
-        scaler_X = StandardScaler()
-        data_scaled = scaler_X.fit_transform(data)
-
-        # Преобразование данных в формат (samples, timesteps, features) для LSTM
-        data_scaled = np.reshape(data_scaled, (data_scaled.shape[0], 1, data_scaled.shape[1]))
-
+        # scaler_X = StandardScaler()
+        # data_scaled = scaler_X.fit_transform(data)
+        #
+        # Загрузка scaler
+        #scaler_y = joblib.load('scaler_y.save')
         # Предсказание с использованием модели
-        result = model.predict(data_scaled)
-
+        #data_reshape = np.reshape(data, (data.shape[0], 1, data.shape[1]))
+        #result = model.predict(data_reshape)
+        data_reshape = np.reshape(data, (data.shape[0], 1, data.shape[1]))
+        # Обратное преобразование из нормализованного формата
+        #result_original = scaler_y.inverse_transform(result)
+        result = model.predict(data_reshape)
         # Возвращаем результат на страницу
         return jsonify({'result': float(result[0][0])})
+        # # # Преобразование данных в формат (samples, timesteps, features) для LSTM
+        # # data_scaled = np.reshape(data_scaled, (data_scaled.shape[0], 1, data_scaled.shape[1]))
+        # data_reshape = np.reshape(data, (data.shape[0], 1, data.shape[1]))
+        # # Предсказание с использованием модели
+        # result = model.predict(data_reshape)
+        #
+        # # Возвращаем результат на страницу
+        # return jsonify({'result': float(result[0][0])})
 
 
 # Маршрут для обучения модели
