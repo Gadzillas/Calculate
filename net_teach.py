@@ -1,79 +1,104 @@
 import numpy as np
+from keras import Input, Model
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense
+from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.callbacks import EarlyStopping
 from flask_socketio import emit
+import tensorflow as tf
 import time
-import joblib
-from tensorflow.keras.layers import Input
+import os
+import pandas as pd
 
-
-def train_and_predict_lstm(data, socketio):
+def train_and_predict_lstm(data, socketio, epochs=72, batch_size=32, scaler_y=None):
     """
-    Функция для обучения модели LSTM и предсказания на основе входных данных.
+    Train LSTM model and make predictions.
 
-    Параметры:
-        data (pd.DataFrame): DataFrame, содержащий входные данные и целевую переменную.
-        socketio: объект SocketIO для отправки данных на клиент.
+    Args:
+        data (pd.DataFrame): Input data containing features and target.
+        socketio: SocketIO object for client communication.
+        epochs (int): Number of training epochs.
+        batch_size (int): Batch size for training.
 
-    Возвращает:
-        y_pred_original (np.ndarray): Предсказанные значения 'effort' в исходном масштабе.
+    Returns:
+        np.ndarray: Predicted values for test data.
     """
+    try:
+        # Data preparation
+        X = data[['total_kdsi', 'aaf', 'rely', 'data', 'cplx', 'time', 'stor', 'virt', 'turn',
+                'acap', 'aexp', 'pcap', 'vexp', 'lexp', 'modp', 'tool', 'sced']].values
+        y = data['effort'].values
 
-    # Выделение входных данных (X) и целевой переменной (y)
-    X = data[['total_kdsi', 'aaf', 'rely', 'data', 'cplx', 'time', 'stor', 'virt', 'turn',
-              'acap', 'aexp', 'pcap', 'vexp', 'lexp', 'modp', 'tool', 'sced']].values
-    y = data['effort'].values
+        # Scale data
+        scaler_X = StandardScaler()
+        X_scaled = scaler_X.fit_transform(X)
+        scaler_y = StandardScaler()
+        y_scaled = scaler_y.fit_transform(y.reshape(-1, 1))
 
-    # Масштабирование данных
-    # scaler_X = StandardScaler()
-    X_scaled = X #scaler_X.fit_transform(X)
+        # Split data
+        X_train, X_test, y_train, y_test = train_test_split(X_scaled, y_scaled, test_size=0.2, random_state=42)
+        X_train = np.reshape(X_train, (X_train.shape[0], 1, X_train.shape[1]))
+        X_test = np.reshape(X_test, (X_test.shape[0], 1, X_test.shape[1]))
 
-    # scaler_y = StandardScaler()
-    y_scaled = y #scaler_y.fit_transform(y.reshape(-1, 1))
+        # Create model with optimized architecture
+        inputs = Input(shape=(X_train.shape[1], X_train.shape[2]))
+        lstm1 = LSTM(128, return_sequences=True)(inputs)
+        dropout1 = Dropout(0.2)(lstm1)
+        lstm2 = LSTM(64, return_sequences=True)(dropout1)
+        dropout2 = Dropout(0.2)(lstm2)
+        lstm3 = LSTM(32)(dropout2)  # Last LSTM layer has return_sequences=False by default
+        dropout3 = Dropout(0.2)(lstm3)
+        dense1 = Dense(16, activation='relu')(dropout3)
+        outputs = Dense(1, activation='linear')(dense1)
+        
+        model = Model(inputs=inputs, outputs=outputs)
 
-    # Разделение данных на обучающую и тестовую выборки
-    X_train, X_test, y_train, y_test = train_test_split(X_scaled, y_scaled, test_size=0.2, random_state=42)
+        # Compile model
+        model.compile(optimizer=Adam(learning_rate=0.001), loss='mean_squared_error')
 
-    # Преобразуем данные в формат для LSTM (samples, timesteps, features)
-    X_train = np.reshape(X_train, (X_train.shape[0], 1, X_train.shape[1]))
-    X_test = np.reshape(X_test, (X_test.shape[0], 1, X_test.shape[1]))
+        # Early stopping callback
+        early_stopping = EarlyStopping(
+            monitor='val_loss',
+            patience=10,
+            restore_best_weights=True
+        )
 
-    # Создание модели LSTM с использованием Input() для явного задания формы входных данных
-    model = Sequential([
-        Input(shape=(X_train.shape[1], X_train.shape[2])),
-        LSTM(100, return_sequences=True),
-        LSTM(100),
-        Dense(1)
-    ])
+        # Training loop with progress updates
+        for epoch in range(epochs):
+            history = model.fit(
+                X_train, y_train,
+                epochs=1,
+                batch_size=batch_size,
+                validation_data=(X_test, y_test),
+                callbacks=[early_stopping],
+                verbose=0
+            )
+            
+            train_loss = history.history['loss'][0]
+            val_loss = history.history['val_loss'][0]
 
-    # Компиляция модели
-    model.compile(optimizer=Adam(learning_rate=0.001), loss='mean_squared_error')
+            print(f"Epoch {epoch + 1}/{epochs}: train_loss={train_loss:.4f}, val_loss={val_loss:.4f}")
+            socketio.emit('training_update', {
+                'epoch': epoch + 1,
+                'train_loss': train_loss,
+                'val_loss': val_loss
+            })
 
-    # Обучение модели с отправкой обновлений на клиент через SocketIO
-    epochs = 85
+            if early_stopping.stopped_epoch:
+                print("Early stopping triggered")
+                break
 
-    for epoch in range(epochs):
-        history = model.fit(X_train, y_train, epochs=1, batch_size=32, validation_data=(X_test, y_test), verbose=0)
-        train_loss = history.history['loss'][0]
-        val_loss = history.history['val_loss'][0]
+        # Make predictions
+        y_pred = model.predict(X_test)
+        y_pred_original = scaler_y.inverse_transform(y_pred)
 
-        # Отправляем данные об ошибках на клиент через SocketIO
-        # Логирование прогресса
-        print(f"Эпоха {epoch + 1}/{epochs}: train_loss={train_loss:.4f}, val_loss={val_loss:.4f}")
-        socketio.emit('training_update', {'epoch': epoch + 1, 'train_loss': train_loss, 'val_loss': val_loss})
-        time.sleep(1)
+        # Save model
+        model.save('model.keras')
+        
+        return y_pred_original
 
-    # Предсказание на тестовых данных
-    y_pred = model.predict(X_test)
-    # Сохранение scaler
-    #joblib.dump(scaler_y, 'scaler_y.save')
-    # Обратное преобразование масштабированных предсказаний в исходный масштаб
-    #y_pred_original = scaler_y.inverse_transform(y_pred)
-
-    # Сохранение обученной модели
-    model.save('model.keras')
-
-    return y_pred
+    except Exception as e:
+        print(f"Error during training: {str(e)}")
+        raise

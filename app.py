@@ -42,25 +42,25 @@ class Data(db.Model):
     sced = db.Column(db.Float, nullable=False)
     effort = db.Column(db.Float, nullable=False)
 
-def __init__(self, total_kdsi, aaf, rely, data, cplx, time, stor, virt, turn, acap, aexp, pcap, vexp, lexp, modp, tool, sced, effort):
-    self.total_kdsi = total_kdsi
-    self.aaf = aaf
-    self.rely = rely
-    self.data = data
-    self.cplx = cplx
-    self.time = time
-    self.stor = stor
-    self.virt = virt
-    self.turn = turn
-    self.acap = acap
-    self.aexp = aexp
-    self.pcap = pcap
-    self.vexp = vexp
-    self.lexp = lexp
-    self.modp = modp
-    self.tool = tool
-    self.sced = sced
-    self.effort = effort
+    def __init__(self, total_kdsi, aaf, rely, data, cplx, time, stor, virt, turn, acap, aexp, pcap, vexp, lexp, modp, tool, sced, effort):
+        self.total_kdsi = total_kdsi
+        self.aaf = aaf
+        self.rely = rely
+        self.data = data
+        self.cplx = cplx
+        self.time = time
+        self.stor = stor
+        self.virt = virt
+        self.turn = turn
+        self.acap = acap
+        self.aexp = aexp
+        self.pcap = pcap
+        self.vexp = vexp
+        self.lexp = lexp
+        self.modp = modp
+        self.tool = tool
+        self.sced = sced
+        self.effort = effort
 
 # Главная страница с формой загрузки файла
 @app.route('/')
@@ -146,32 +146,33 @@ def count():
                 'total_kdsi', 'aaf', 'rely', 'data', 'cplx', 'time', 'stor', 'virt', 'turn',
                 'acap', 'aexp', 'pcap', 'vexp', 'lexp', 'modp', 'tool', 'sced'
             ]]])
+            
+            # Масштабирование данных
+            scaler_X = StandardScaler()
+            # Загружаем обучающие данные для правильного масштабирования
+            conn = sqlite3.connect('instance/data.db')
+            train_data = pd.read_sql_query("SELECT * FROM data", conn)
+            conn.close()
+            
+            # Подготавливаем scaler на обучающих данных
+            X_train = train_data[{
+                'total_kdsi', 'aaf', 'rely', 'data', 'cplx', 'time', 'stor', 'virt', 'turn',
+                'acap', 'aexp', 'pcap', 'vexp', 'lexp', 'modp', 'tool', 'sced'
+            }].values
+            scaler_X.fit(X_train)
+            
+            # Масштабируем входные данные
+            data_scaled = scaler_X.transform(data)
+            data_reshape = np.reshape(data_scaled, (data_scaled.shape[0], 1, data_scaled.shape[1]))
+            
+            # Предсказание
+            result = model.predict(data_reshape)
+            
+            # Возвращаем результат
+            return jsonify({'result': float(result[0][0])})
+            
         except ValueError as e:
             return jsonify({"error": f"Некорректные входные данные: {e}"}), 400
-        # Масштабирование данных (как при обучении)
-        # scaler_X = StandardScaler()
-        # data_scaled = scaler_X.fit_transform(data)
-        #
-        # Загрузка scaler
-        #scaler_y = joblib.load('scaler_y.save')
-        # Предсказание с использованием модели
-        #data_reshape = np.reshape(data, (data.shape[0], 1, data.shape[1]))
-        #result = model.predict(data_reshape)
-        data_reshape = np.reshape(data, (data.shape[0], 1, data.shape[1]))
-        # Обратное преобразование из нормализованного формата
-        #result_original = scaler_y.inverse_transform(result)
-        result = model.predict(data_reshape)
-        # Возвращаем результат на страницу
-        return jsonify({'result': float(result[0][0])})
-        # # # Преобразование данных в формат (samples, timesteps, features) для LSTM
-        # # data_scaled = np.reshape(data_scaled, (data_scaled.shape[0], 1, data_scaled.shape[1]))
-        # data_reshape = np.reshape(data, (data.shape[0], 1, data.shape[1]))
-        # # Предсказание с использованием модели
-        # result = model.predict(data_reshape)
-        #
-        # # Возвращаем результат на страницу
-        # return jsonify({'result': float(result[0][0])})
-
 
 # Маршрут для обучения модели
 @app.route("/teaching")
@@ -197,12 +198,9 @@ def Signin():
     # Ваш код логики входа
     return render_template('Signin.html')
 
-
 if __name__ == '__main__':
     # Установка контекста приложения для работы с базой данных
     with app.app_context():
         db.create_all()  # Создание таблиц в базе данных
     # Запуск сервера Flask
     socketio.run(app, debug=True, allow_unsafe_werkzeug=True)
-
-
